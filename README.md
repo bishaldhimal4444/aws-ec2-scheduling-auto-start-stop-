@@ -170,10 +170,10 @@ def lambda_handler(event, context):
 Test manually before connecting EventBridge. Always test stop first (safer).
 
 Test Event: Stop \
-24.	Lambda console -> Code tab -> Test -> Create new test event
-25.	Event name: stop-ec2
-26.	Event JSON: ```{ "action": "stop" }```
-27.	Click Save -> Test
+24.	Lambda console -> Code tab -> Test -> Create new test event \
+25.	Event name: stop-ec2 \
+26.	Event JSON: ```{ "action": "stop" }``` \
+27.	Click Save -> Test \
 28.	Expected response:
 ```
 {
@@ -185,7 +185,74 @@ Test Event: Stop \
 ```
 
 Test Event: Start \
-29.	Create another test event named: start-ec2
-30.	Event JSON: { "action": "start" }
+29.	Create another test event named: start-ec2 \
+30.	Event JSON: { "action": "start" } \
 31.	Run it and confirm instance moves to Running state in EC2 console
+
+## Step 5 — EventBridge Scheduler
+Create two EventBridge Scheduler rules. Set the timezone explicitly to avoid UTC confusion.
+
+Rule 1 — Start at 8 AM \
+32.	Amazon EventBridge -> Scheduler -> Schedules -> Create Schedule \
+33.	Schedule name: my-ec2-start \
+34.	Schedule type: Recurring -> Cron-based schedule \
+35.	Timezone: Asia/Kolkata (select your local timezone) \
+36.	Cron expression: 0 8 * * ? * \
+37.	Click Next \
+38.	Target: AWS Lambda -> select ec2-start-stop \
+39.	Input: Constant (JSON text) -> ```{ "action": "start" }``` \
+40.	Action after completion: NONE \
+41.	Click Next -> Next -> Create Schedule
+
+Rule 2 — Stop at 8 PM \
+42.	Create another schedule named: my-ec2-stop \
+43.	Same settings but: \
+•	Cron expression: 0 20 * * ? * \
+•	Input payload: { "action": "stop" }
+
+| Schedule Name	| Cron Expression	|Action Payload	|Fires At (IST)|
+|---------------|-----------------|---------------|--------------|
+|my-ec2-start |	0 8 * * ? *	| { "action": "start" }	| 8:00 AM daily |
+|my-ec2-stop	| 0 20 * * ? *	| { "action": "stop" }	| 8:00 PM daily |
+
+## Step 6 — Production Hardening
+These four additions make your setup genuinely production-ready: email alerting on failure, dead letter queue, log retention, and alarm monitoring.
+
+##### 6.1  SNS Alert Topic (Email Notification on Failure) \
+44.	Go to SNS -> Topics -> Create Topic \
+45.	Type: Standard  |  Name: ec2-scheduler-alerts -> Create Topic \
+46.	Click the topic -> Create Subscription \
+47.	Protocol: Email  |  Endpoint: your-email@example.com -> Create \
+48.	Open your inbox and click the AWS confirmation link
+
+
+#####  6.2  CloudWatch Alarm on Lambda Errors \
+49.	Go to CloudWatch -> Alarms -> Create Alarm \
+50.	Click Select Metric -> Lambda -> By Function Name \
+51.	Find ec2-start-stop -> select Errors metric -> Select Metric \
+52.	Condition: Greater than 0 for 1 datapoint in 1 minute \
+53.	Next -> In Alarm -> choose SNS topic: ec2-scheduler-alerts \
+54.	Alarm name: ec2-scheduler-lambda-errors -> Create Alarm
+```
+What this gives you
+If Lambda fails at 8 AM (permissions error, timeout, API throttle), you receive an email within 1-2 minutes. Without this, instances stay in the wrong state all day with zero visibility.
+```
+
+#####  6.3  Dead Letter Queue (DLQ)
+55.	Go to SQS -> Create Queue -> Type: Standard \
+56.	Name: ec2-scheduler-dlq -> Create Queue \
+57.	Lambda -> Configuration -> Asynchronous Invocation -> Edit \
+58.	Dead-letter queue service: SQS -> select ec2-scheduler-dlq \
+59.	Maximum age of event: 1 hour  |  Retry attempts: 2 -> Save
+```
+Why a DLQ matters
+EventBridge invokes Lambda asynchronously. If Lambda fails with no DLQ, the failed event is permanently lost with no record. A DLQ captures failed invocations in SQS where you can inspect or replay them.
+```
+
+##### 6.4  CloudWatch Log Retention \
+60.	Go to CloudWatch -> Log Groups
+61.	Find: /aws/lambda/ec2-start-stop
+62.	Click Actions -> Edit Retention Setting -> 30 days -> Save
+
+
 
