@@ -1,5 +1,4 @@
-# aws-ec2-scheduling-auto-start/stop
-AWS EC2 Auto Start/Stop.
+# AWS EC2 Auto Start/Stop.
 ## 1. Architecture Overview:
 EventBridge  ->  Lambda  ->  EC2  (Tag-Based Scheduling)
 
@@ -28,8 +27,144 @@ How to Add the Tag
 4.	Click Add Tag and enter exactly:
 
 |Tag Key|Tag Value|
+|-------|---------|
 |AutoSchedule|true|
 
 5.	Click Save — repeat for every instance you want scheduled
 
-## Step-2: 
+## Step-2: Create IAM Role (Least Privilege): 
+The Lambda function needs an IAM Role with exactly the permissions it requires — nothing more. The stop/start permission is additionally restricted to only work on instances with the AutoSchedule=true tag.
+
+Create the Role
+6.	Go to IAM -> Roles -> Create Role
+7.	Trusted entity type: AWS Service -> Lambda -> Next
+8.	Skip attaching managed policies for now -> Next
+9.	Role name: ec2-scheduler-lambda-role -> Create Role
+10.	Open the new role -> Add Permissions -> Create Inline Policy
+11.	Switch to JSON tab and paste the policy below -> Next
+12.	Policy name: ec2-scheduler-policy -> Create Policy
+13.	Also attach AWSLambdaBasicExecutionRole (for CloudWatch logs):
+•	Add Permissions -> Attach Policies -> search AWSLambdaBasicExecutionRole -> Attach
+```
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["ec2:DescribeInstances"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StartInstances",
+        "ec2:StopInstances"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/AutoSchedule": "true"
+        }
+      }
+    }
+  ]
+}
+```
+```
+Why this policy is secure
+DescribeInstances needs Resource: * because it is a list operation. StartInstances and StopInstances are restricted by a tag condition — IAM independently enforces that only AutoSchedule=true instances can be touched, even if Lambda code had a bug.
+```
+
+## Step 3 — Create the Lambda Function
+Create Function in AWS Console \
+14.	Go to Lambda -> Functions -> Create Function \
+15.	Select: Author from scratch \
+16.	Function name: ec2-start-stop \
+17.	Runtime: Python 3.12 \
+18.	Execution role: Use an existing role -> ec2-scheduler-lambda-role \
+19.	Click Create Function
+
+Update Basic Settings \
+20.	Go to Configuration -> General Configuration -> Edit \
+21.	Set Timeout to 0 min 30 sec \
+22.	Memory: 128 MB \
+23.	Click Save
+
+Final Production Lambda Code \
+Replace default code in the Code tab with the code below. Click Deploy after pasting.
+```
+import boto3
+import logging
+
+# Structured logging -- appears cleanly in CloudWatch
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+ec2 = boto3.client("ec2")
+
+def lambda_handler(event, context):
+    action = event.get("action")
+
+    # Validate action before doing anything
+    if action not in ["start", "stop"]:
+        logger.error(f"Invalid action received: {action}")
+        return {"error": "Invalid action. Use start or stop"}
+
+    target_state = "running" if action == "stop" else "stopped"
+
+    # Find eligible instances -- wrapped in try/except
+    try:
+        response = ec2.describe_instances(
+            Filters=[
+                {"Name": "tag:AutoSchedule", "Values": ["true"]},
+                {"Name": "instance-state-name", "Values": [target_state]}
+            ]
+        )
+    except Exception as e:
+        logger.error(f"Failed to describe instances: {str(e)}")
+        raise  # Re-raise so Lambda marks execution as FAILED
+
+    instance_ids = []
+    instance_details = []
+
+    for reservation in response["Reservations"]:
+        for instance in reservation["Instances"]:
+            instance_id = instance["InstanceId"]
+
+            # Extract Name tag from the tags list
+            name = "Unnamed"
+            for tag in instance.get("Tags", []):
+                if tag["Key"] == "Name":
+                    name = tag["Value"]
+                    break
+
+            instance_ids.append(instance_id)
+            instance_details.append({"id": instance_id, "name": name})
+
+    if not instance_ids:
+        logger.info(f"No eligible instances found for action: {action}")
+        return {"message": f"No instances to {action}"}
+
+    # Execute start or stop with error handling
+    try:
+        if action == "start":
+            ec2.start_instances(InstanceIds=instance_ids)
+            logger.info(f"Started instances: {instance_details}")
+            return {
+                "message": f"Started {len(instance_ids)} instance(s)",
+                "instances": instance_details
+            }
+        elif action == "stop":
+            ec2.stop_instances(InstanceIds=instance_ids)
+            logger.info(f"Stopped instances: {instance_details}")
+            return {
+                "message": f"Stopped {len(instance_ids)} instance(s)",
+                "instances": instance_details
+            }
+    except Exception as e:
+        logger.error(f"Failed to {action} instances {instance_ids}: {str(e)}")
+        raise  # Re-raise so Lambda marks execution as FAILED
+```
+
+## Step 4 — Test the Lambda
+
