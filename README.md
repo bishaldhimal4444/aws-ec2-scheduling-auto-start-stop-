@@ -167,4 +167,25 @@ def lambda_handler(event, context):
 ```
 
 ## Step 4 — Test the Lambda
+Test manually before connecting EventBridge. Always test stop first (safer).
+
+Test Event: Stop \
+24.	Lambda console -> Code tab -> Test -> Create new test event
+25.	Event name: stop-ec2
+26.	Event JSON: ```{ "action": "stop" }```
+27.	Click Save -> Test
+28.	Expected response:
+```
+{
+  "message": "Stopped 1 instance(s)",
+  "instances": [
+    { "id": "i-0ed579eafdd73266f", "name": "schedule_instance-bsltest" }
+  ]
+}
+```
+
+Test Event: Start \
+29.	Create another test event named: start-ec2
+30.	Event JSON: { "action": "start" }
+31.	Run it and confirm instance moves to Running state in EC2 console
 
