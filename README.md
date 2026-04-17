@@ -9,7 +9,7 @@ Amazon EC2: ```Only instances tagged AutoSchedule=true are affected```
 ## 2. AWS Services Used: 
 |Service	| Purpose	| Key Setting |
 |----------|----------|-------------|
-|Amazon EventBridge|Triggers Lambda on cron schedule|Timezone: Asia/Kolkata|
+|Amazon EventBridge|Triggers Lambda on cron schedule|Timezone: UTC+05:45|
 |AWS Lambda|Runs start/stop logic on EC2|Runtime: Python 3.12, Timeout: 30s|
 |Amazon EC2|Target instances controlled by tags|Tag: AutoSchedule=true|
 |AWS IAM|Least privilege permissions|Tag-conditioned start/stop policy|
