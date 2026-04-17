@@ -232,7 +232,8 @@ These four additions make your setup genuinely production-ready: email alerting 
 52.	Condition: Greater than 0 for 1 datapoint in 1 minute \
 53.	Next -> In Alarm -> choose SNS topic: ec2-scheduler-alerts \
 54.	Alarm name: ec2-scheduler-lambda-errors -> Create Alarm
-> [!What this gives you]  
+> [!NOTE]
+> What this gives you
 > If Lambda fails at 8 AM (permissions error, timeout, API throttle), you receive an email within 1-2 minutes. Without this, instances stay in the wrong state all day with zero visibility.
 
 
